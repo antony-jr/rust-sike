@@ -2,6 +2,7 @@
 //!
 //! Implementation of the finite field of order SIKE_P503_P used in SIKEp503
 
+extern crate num_bigint_dig as num_bigint;
 use crate::constants::cs_p503::SIKE_P503_P;
 use crate::ff::FiniteField;
 
@@ -11,21 +12,25 @@ use once_cell::sync::Lazy;
 
 use std::fmt::Debug;
 
-use rug::{integer::Order::MsfBe, Integer};
+use num_bigint::traits::ModInverse;
+use num_bigint::BigInt;
+use num_traits::{Num, One, Zero};
+//use rug::{integer::Order::MsfBe, Integer};
 
 // Parsing a constant value, tests ensure no panic
-static P503_PRIME: Lazy<Integer> = Lazy::new(|| Integer::from_str_radix(SIKE_P503_P, 16).unwrap());
+static P503_PRIME: Lazy<BigInt> =
+    Lazy::new(|| <BigInt as Num>::from_str_radix(SIKE_P503_P, 16).unwrap());
 
 /// Finite field defined by the prime number SIKE_P503_P
 #[derive(Clone, PartialEq)]
 pub struct PrimeFieldP503 {
-    val: Integer,
+    val: BigInt,
 }
 
 impl PrimeFieldP503 {
     /// Parse a string into and element of the finite field
     pub fn from_string(s: &str) -> Result<Self, String> {
-        Integer::from_str_radix(&s, 16)
+        <BigInt as Num>::from_str_radix(&s, 16)
             .or_else(|_| Err(String::from("Cannot parse from string")))
             .and_then(|val| Ok(Self { val }))
     }
@@ -33,14 +38,14 @@ impl PrimeFieldP503 {
 
 impl Debug for PrimeFieldP503 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bytes = self.val.to_string_radix(16);
+        let bytes = self.val.to_str_radix(16);
         write!(f, "{:?}", bytes)
     }
 }
 
 impl PrimeFieldP503 {
     #[inline]
-    fn order() -> &'static Integer {
+    fn order() -> &'static BigInt {
         &*P503_PRIME
     }
 }
@@ -58,38 +63,35 @@ impl FiniteField for PrimeFieldP503 {
 
     #[inline]
     fn zero() -> Self {
-        Self {
-            val: Integer::new(),
-        }
+        Self { val: Zero::zero() }
     }
 
     #[inline]
     fn one() -> Self {
-        Self {
-            val: Integer::from(1),
-        }
+        Self { val: One::one() }
     }
 
     #[inline]
     fn neg(&self) -> Self {
-        Self {
-            val: Integer::from(Self::order() - &self.val),
-        }
+        let x: BigInt = Self::order() - &self.val;
+        Self { val: x }
     }
 
     #[inline]
     fn inv(&self) -> Result<Self, String> {
-        Integer::from(&self.val)
-            .invert(Self::order())
-            .or_else(|_| Err(String::from("Cannot invert")))
-            .and_then(|val| Ok(Self { val }))
+        let x: BigInt = self.val.clone();
+        match x.mod_inverse(Self::order()) {
+            Some(inv_x) => Ok(Self { val: inv_x }),
+            None => Err(String::from("Cannot invert")),
+        }
     }
 
     #[inline]
     fn add(&self, other: &Self) -> Self {
-        Self {
-            val: Integer::from(&self.val + &other.val) % Self::order(),
-        }
+        let x: BigInt = &self.val + &other.val;
+        let x: BigInt = x % Self::order();
+
+        Self { val: x }
     }
 
     #[inline]
@@ -99,9 +101,10 @@ impl FiniteField for PrimeFieldP503 {
 
     #[inline]
     fn mul(&self, other: &Self) -> Self {
-        Self {
-            val: Integer::from(&self.val * &other.val) % Self::order(),
-        }
+        let x: BigInt = &self.val * &other.val;
+        let x: BigInt = x % Self::order();
+
+        Self { val: x }
     }
 
     #[inline]
@@ -115,13 +118,14 @@ impl FiniteField for PrimeFieldP503 {
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        self.val.to_digits::<u8>(MsfBe)
+        let (_sign, r) = self.val.to_bytes_be();
+        r
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let s = hex::encode(bytes);
 
-        Integer::from_str_radix(&s, 16)
+        <BigInt as Num>::from_str_radix(&s, 16)
             .or_else(|_| Err(String::from("Cannot parse from bytes")))
             .and_then(|val| Ok(Self { val }))
     }
